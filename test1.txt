@@ -17,7 +17,7 @@
 #    	./nazwa_skryptu.sh
 #
 # 	2. Migracja przyrostowa od określonej daty (np. 2024-01-01):
-#    	./nazwa_skryptu.sh incremental 2024-01-01
+#    	./nazwa_skryptu.sh incremental "2024-12-10T00:00:00Z"
 #
 # 	3. Wznowienie przerwanego procesu:
 #    	./nazwa_skryptu.sh
@@ -140,3 +140,11 @@ generate_file_list() {
     local elapsed_time=$(( end_time - start_time ))
     echo "Czas generowania listy plików: ${elapsed_time} sekund"
 }
+
+case $1 in
+    generate_list) generate_file_list ;;
+    resume) resume_migration ;;
+    incremental) incremental_migration $2 ;;
+    verify) verify_migration ;;
+    *) echo "Nieznane polecenie: $1" ;;
+esac
