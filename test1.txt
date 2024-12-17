@@ -43,9 +43,10 @@ PROFIL_DOCELOWY="profil-docelowy"
 
 # Tymczasowy katalog na przechowywanie plików
 KATALOG_TYMCZASOWY="/tmp/s3_transfer"
-LOGI_PLIKI_PRZESLANE="/tmp/przelane_pliki.log"
+LOGI_PLIKI_PRZESLANE="/tmp/przeslane_pliki.log"
 LOGI_BLEDY_PLIKI="/tmp/nie_przeszlo_pliki.log"
 OSTATNI_PRZETWORZONY_PLIK="/tmp/ostatni_przetworzony_plik.log"
+$S3ENDPOINT = https://global.s3
 
 # Tworzenie katalogu tymczasowego
 mkdir -p "$KATALOG_TYMCZASOWY"
@@ -68,7 +69,7 @@ log_success() {
 # Generowanie listy plików do migracji, jeśli brak listy wejściowej
 if [ -z "$1" ]; then
     echo "Generowanie listy plików z bucketu $BUCKET_ZRODLOWY..."
-    aws s3 ls "s3://$BUCKET_ZRODLOWY/" --profile "$PROFIL_ZRODLOWY" --recursive --no-verify-ssl --endpoint-url https://global.s3 | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow.txt"
+    aws s3 ls "s3://$BUCKET_ZRODLOWY/" --profile "$PROFIL_ZRODLOWY" --recursive --no-verify-ssl --endpoint-url $S3ENDPOINT | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow.txt"
 else
     cp "$1" "$KATALOG_TYMCZASOWY/lista_plikow.txt"
 fi
@@ -79,7 +80,7 @@ while IFS= read -r SCIEZKA_PLIKU; do
     echo "$SCIEZKA_PLIKU" > "$OSTATNI_PRZETWORZONY_PLIK"
 
     # Pobranie pliku z bucketu źródłowego
-    if aws s3 cp "s3://$BUCKET_ZRODLOWY/$SCIEZKA_PLIKU" "$KATALOG_TYMCZASOWY/$SCIEZKA_PLIKU" --profile "$PROFIL_ZRODLOWY" --no-verify-ssl --endpoint-url https://global.s3; then
+    if aws s3 cp "s3://$BUCKET_ZRODLOWY/$SCIEZKA_PLIKU" "$KATALOG_TYMCZASOWY/$SCIEZKA_PLIKU" --profile "$PROFIL_ZRODLOWY" --no-verify-ssl --endpoint-url $S3ENDPOINT; then
         echo "Pobrano plik $SCIEZKA_PLIKU"
     else
         log_error "Nie udalo sie pobrac pliku $SCIEZKA_PLIKU"
@@ -87,7 +88,7 @@ while IFS= read -r SCIEZKA_PLIKU; do
     fi
 
     # Wgranie pliku do bucketu docelowego
-    if aws s3 cp "$KATALOG_TYMCZASOWY/$SCIEZKA_PLIKU" "s3://$BUCKET_DOCELOWY/$SCIEZKA_PLIKU" --profile "$PROFIL_DOCELOWY" --no-verify-ssl --endpoint-url https://global.s3; then
+    if aws s3 cp "$KATALOG_TYMCZASOWY/$SCIEZKA_PLIKU" "s3://$BUCKET_DOCELOWY/$SCIEZKA_PLIKU" --profile "$PROFIL_DOCELOWY" --no-verify-ssl --endpoint-url $S3ENDPOINT; then
         echo "Przeslano plik $SCIEZKA_PLIKU"
         log_success "$SCIEZKA_PLIKU"
     else
@@ -115,14 +116,14 @@ resume_migration() {
 incremental_migration() {
     DATA_OD=$1
     echo "Generowanie listy plików od daty: $DATA_OD"
-    aws s3api list-objects-v2 --bucket "$BUCKET_ZRODLOWY" --profile "$PROFIL_ZRODLOWY" --query "Contents[?LastModified>='$DATA_OD'].{Key: Key}" --output text --no-verify-ssl --endpoint-url https://global.s3 | sort > "$KATALOG_TYMCZASOWY/lista_plikow_od_daty.txt"
+    aws s3api list-objects-v2 --bucket "$BUCKET_ZRODLOWY" --profile "$PROFIL_ZRODLOWY" --query "Contents[?LastModified>='$DATA_OD'].{Key: Key}" --output text --no-verify-ssl --endpoint-url $S3ENDPOINT | sort > "$KATALOG_TYMCZASOWY/lista_plikow_od_daty.txt"
     cp "$KATALOG_TYMCZASOWY/lista_plikow_od_daty.txt" "$KATALOG_TYMCZASOWY/lista_plikow.txt"
 }
 
 # Weryfikacja ilościowa
 verify_migration() {
     echo "Weryfikacja migracji..."
-    aws s3 ls "s3://$BUCKET_DOCELOWY/" --profile "$PROFIL_DOCELOWY" --recursive --no-verify-ssl --endpoint-url https://global.s3 | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow_do_weryfikacji.txt"
+    aws s3 ls "s3://$BUCKET_DOCELOWY/" --profile "$PROFIL_DOCELOWY" --recursive --no-verify-ssl --endpoint-url $S3ENDPOINT | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow_do_weryfikacji.txt"
     diff "$KATALOG_TYMCZASOWY/lista_plikow.txt" "$KATALOG_TYMCZASOWY/lista_plikow_do_weryfikacji.txt" > "$KATALOG_TYMCZASOWY/weryfikacja_rozbieznosci.txt"
     if [ -s "$KATALOG_TYMCZASOWY/weryfikacja_rozbieznosci.txt" ]; then
         echo "Wykryto rozbieżności w plikach. Szczegóły w $KATALOG_TYMCZASOWY/weryfikacja_rozbieznosci.txt"
@@ -135,7 +136,7 @@ verify_migration() {
 generate_file_list() {
     echo "Generowanie listy plików z bucketu $BUCKET_ZRODLOWY..."
     local start_time=$(date +%s)
-    aws s3 ls "s3://$BUCKET_ZRODLOWY/" --profile "$PROFIL_ZRODLOWY" --recursive --no-verify-ssl --endpoint-url https://global.s3 | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow.txt"
+    aws s3 ls "s3://$BUCKET_ZRODLOWY/" --profile "$PROFIL_ZRODLOWY" --recursive --no-verify-ssl --endpoint-url $S3ENDPOINT | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow.txt"
     local end_time=$(date +%s)
     local elapsed_time=$(( end_time - start_time ))
     echo "Czas generowania listy plików: ${elapsed_time} sekund"

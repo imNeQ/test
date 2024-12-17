@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# Skrypt do migracji plików pomiędzy dwoma bucketami S3
+# Funkcjonalności skryptu:
+# 1. Pełna migracja - migracja wszystkich plików z bucketu źródłowego do docelowego.
+# 2. Migracja przyrostowa - migracja plików zmodyfikowanych od wskazanej daty (parametr data).
+# 3. Wznowienie migracji - wznowienie migracji od ostatniego przerwanego pliku (na podstawie pliku z logami).
+# 4. Weryfikacja migracji - porównanie listy plików w bucketach źródłowym i docelowym.
+# 5. Automatyczne domigrowanie plików, które się nie udało przesłać.
+
+# Użycie skryptu:
+# 1. Pełna migracja wszystkich plików:
+#    ./nazwa_skryptu.sh full
+# 2. Migracja przyrostowa od podanej daty:
+#    ./nazwa_skryptu.sh incremental "YYYY-MM-DDTHH:MM:SSZ"
+# 3. Wznowienie przerwanego procesu migracji:
+#    ./nazwa_skryptu.sh resume
+# 4. Weryfikacja, czy wszystkie pliki zostały przeniesione:
+#    ./nazwa_skryptu.sh verify
+# 5. Ponowna próba przesłania plików, które się nie udało przenieść:
+#    ./nazwa_skryptu.sh retry
+
+# Nazwy bucketów
+BUCKET_ZRODLOWY="test"
+BUCKET_DOCELOWY="test2"
+
+# Profile AWS CLI dla użytkowników
+PROFIL_ZRODLOWY="profil-zrodlowy"
+PROFIL_DOCELOWY="profil-docelowy"
+
+# Ścieżki do plików logów
+KATALOG_TYMCZASOWY="/tmp/s3_transfer"
+LOGI_PLIKI_PRZESLANE="$KATALOG_TYMCZASOWY/przeslane_pliki.log"
+LOGI_BLEDY_PLIKI="$KATALOG_TYMCZASOWY/nie_przeszlo_pliki.log"
+OSTATNI_PRZETWORZONY_PLIK="$KATALOG_TYMCZASOWY/ostatni_przetworzony_plik.log"
+S3ENDPOINT="https://global.s3"
+
+mkdir -p "$KATALOG_TYMCZASOWY"
+touch "$LOGI_PLIKI_PRZESLANE" "$LOGI_BLEDY_PLIKI" "$OSTATNI_PRZETWORZONY_PLIK"
+
+log_error() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOGI_BLEDY_PLIKI"
+}
+
+log_success() {
+    echo "$1" >> "$LOGI_PLIKI_PRZESLANE"
+}
+
+generate_file_list() {
+    echo "Generowanie listy plików z bucketu $BUCKET_ZRODLOWY..."
+    aws s3 ls "s3://$BUCKET_ZRODLOWY/" --profile "$PROFIL_ZRODLOWY" --recursive --no-verify-ssl --endpoint-url $S3ENDPOINT | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow.txt"
+}
+
+migrate() {
+    if [ -f "$1" ]; then
+        cp "$1" "$KATALOG_TYMCZASOWY/lista_plikow.txt"
+    fi
+
+    while IFS= read -r SCIEZKA_PLIKU; do
+        echo "Przetwarzanie pliku: $SCIEZKA_PLIKU"
+        echo "$SCIEZKA_PLIKU" > "$OSTATNI_PRZETWORZONY_PLIK"
+
+        if aws s3 cp "s3://$BUCKET_ZRODLOWY/$SCIEZKA_PLIKU" "$KATALOG_TYMCZASOWY/$SCIEZKA_PLIKU" --profile "$PROFIL_ZRODLOWY" --no-verify-ssl --endpoint-url $S3ENDPOINT; then
+            log_success "$SCIEZKA_PLIKU"
+        else
+            log_error "$SCIEZKA_PLIKU"
+            continue
+        fi
+
+        if aws s3 cp "$KATALOG_TYMCZASOWY/$SCIEZKA_PLIKU" "s3://$BUCKET_DOCELOWY/$SCIEZKA_PLIKU" --profile "$PROFIL_DOCELOWY" --no-verify-ssl --endpoint-url $S3ENDPOINT; then
+            log_success "$SCIEZKA_PLIKU"
+        else
+            log_error "$SCIEZKA_PLIKU"
+        fi
+
+        rm -f "$KATALOG_TYMCZASOWY/$SCIEZKA_PLIKU"
+    done < "$KATALOG_TYMCZASOWY/lista_plikow.txt"
+}
+
+resume_migration() {
+    if [ -f "$OSTATNI_PRZETWORZONY_PLIK" ]; then
+        last_file=$(cat "$OSTATNI_PRZETWORZONY_PLIK")
+        awk -v last_file="$last_file" 'BEGIN {skip=1} {if ($0 == last_file) skip=0} !skip' "$KATALOG_TYMCZASOWY/lista_plikow.txt" > "$KATALOG_TYMCZASOWY/lista_plikow_do_wznowienia.txt"
+        mv "$KATALOG_TYMCZASOWY/lista_plikow_do_wznowienia.txt" "$KATALOG_TYMCZASOWY/lista_plikow.txt"
+    fi
+    migrate
+}
+
+incremental_migration() {
+    DATA_OD="$1"
+    aws s3api list-objects-v2 --bucket "$BUCKET_ZRODLOWY" --profile "$PROFIL_ZRODLOWY" --query "Contents[?LastModified>='$DATA_OD'].{Key: Key}" --output text --no-verify-ssl --endpoint-url $S3ENDPOINT | sort > "$KATALOG_TYMCZASOWY/lista_plikow.txt"
+    migrate
+}
+
+verify_migration() {
+    aws s3 ls "s3://$BUCKET_DOCELOWY/" --profile "$PROFIL_DOCELOWY" --recursive --no-verify-ssl --endpoint-url $S3ENDPOINT | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow_do_weryfikacji.txt"
+    diff "$KATALOG_TYMCZASOWY/lista_plikow.txt" "$KATALOG_TYMCZASOWY/lista_plikow_do_weryfikacji.txt" > "$KATALOG_TYMCZASOWY/weryfikacja_rozbieznosci.txt"
+}
+
+retry_failed_migration() {
+    if [ -f "$LOGI_BLEDY_PLIKI" ]; then
+        cp "$LOGI_BLEDY_PLIKI" "$KATALOG_TYMCZASOWY/lista_plikow.txt"
+        migrate
+    else
+        echo "Brak plików do ponownej migracji."
+    fi
+}
+
+case "$1" in
+    "full") generate_file_list; migrate ;;
+    "incremental") incremental_migration "$2" ;;
+    "resume") resume_migration ;;
+    "verify") verify_migration ;;
+    "retry") retry_failed_migration ;;
+    *) echo "Użyj: $0 {full|incremental [DATA]|resume|verify|retry}" ;;
+esac
