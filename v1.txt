@@ -47,7 +47,7 @@ migrate() {
 
     local end_time=$(date +%s)
     local elapsed_time=$(( end_time - start_time ))
-    printf "Migracja zakończona w czasie: %02d godz. %02 min. %02d sek.\n" $((elapsed_time/3600)) $((elapsed_time/3600)) $((elapsed_time/3600))
+    printf "Migracja zakończona w czasie: %02d godz. %02 min. %02d sek.\n" $((elapsed_time/3600)) $((elapsed_time%3600/60)) $((elapsed_time%60))
 }
 
 resume_migration() {
@@ -66,7 +66,9 @@ incremental_migration() {
 }
 
 verify_migration() {
-    aws s3 ls "s3://$BUCKET_DOCELOWY/" --profile "$PROFIL_DOCELOWY" --recursive --no-verify-ssl --endpoint-url $S3ENDPOINT | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow_do_weryfikacji.txt"
+	cp "$KATALOG_TYMCZASOWY/lista_plikow.txt" "$KATALOG_TYMCZASOWY/lista_plikow.txt.orginal"
+    aws s3 ls "s3://$BUCKET_DOCELOWY/" --profile "$PROFIL_DOCELOWY" --recursive --no-verify-ssl --endpoint-url $S3ENDPOINT | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow_do_weryfikacji_docelowy.txt"
+    aws s3 ls "s3://$BUCKET_ZRODLOWY/" --profile "$PROFIL_ZRODLOWY" --recursive --no-verify-ssl --endpoint-url $S3ENDPOINT | awk '{print $4}' | sort > "$KATALOG_TYMCZASOWY/lista_plikow_do_weryfikacji_zrodlowy.txt"
     diff "$KATALOG_TYMCZASOWY/lista_plikow.txt" "$KATALOG_TYMCZASOWY/lista_plikow_do_weryfikacji.txt" > "$KATALOG_TYMCZASOWY/weryfikacja_rozbieznosci.txt"
 }
 
