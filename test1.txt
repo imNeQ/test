@@ -66,6 +66,8 @@ log_success() {
     echo "$1" >> "$LOGI_PLIKI_PRZESLANE"
 }
 
+
+migrate() {
 # Generowanie listy plików do migracji, jeśli brak listy wejściowej
 if [ -z "$1" ]; then
     echo "Generowanie listy plików z bucketu $BUCKET_ZRODLOWY..."
@@ -103,6 +105,7 @@ done < "$KATALOG_TYMCZASOWY/lista_plikow.txt"
 rm -rf "$KATALOG_TYMCZASOWY"
 
 echo "Kopiowanie zakończone!"
+}
 
 # Funkcje dodatkowe dla przerwanego procesu i migracji przyrostowej
 resume_migration() {
@@ -142,10 +145,10 @@ generate_file_list() {
     echo "Czas generowania listy plików: ${elapsed_time} sekund"
 }
 
-case $1 in
-    generate_list) generate_file_list ;;
-    resume) resume_migration ;;
-    incremental) incremental_migration $2 ;;
-    verify) verify_migration ;;
-    *) echo "Nieznane polecenie: $1" ;;
-esac
+if declare -f "$1" > /dev/null
+	then
+		"$1"
+else
+	echo "Niepoprawna funkcja: $1"
+	echo "Dostępne funkcje: migrate, generate_file_list, incremental_migration, verify_migration"
+fi

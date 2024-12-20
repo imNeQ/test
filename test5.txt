@@ -1,0 +1,19 @@
+cat "$KATALOG_TYMCZASOWY/lista_plikow.txt" | xargs -I {} -P 10 bash -c ' 
+    aws s3 cp "s3://'$BUCKET_ZRODLOWY'/{}" "/tmp/s3_transfer/{}" --profile '$PROFIL_ZRODLOWY' --no-verify-ssl --endpoint-url '$S3ENDPOINT' &&
+    aws s3 cp "/tmp/s3_transfer/{}" "s3://'$BUCKET_DOCELOWY'/{}" --profile '$PROFIL_DOCELOWY' --no-verify-ssl --endpoint-url '$S3ENDPOINT' &&
+    rm -f "/tmp/s3_transfer/{}"
+'
+
+echo "$1" >> "$KATALOG_TYMCZASOWY/przeslane_batch.log"
+if (( $(wc -l < "$KATALOG_TYMCZASOWY/przeslane_batch.log") >= 100 )); then
+    cat "$KATALOG_TYMCZASOWY/przeslane_batch.log" >> "$LOGI_PLIKI_PRZESLANE"
+    > "$KATALOG_TYMCZASOWY/przeslane_batch.log"
+fi
+
+
+split_file_list() {
+    echo "Dzielenie listy plików na 4 shardy..."
+    split -n l/4 "$KATALOG_TYMCZASOWY/lista_plikow.txt" "$KATALOG_TYMCZASOWY/lista_plikow_czesc_"
+}
+
+"split") generate_file_list; split_file_list ;;
