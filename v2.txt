@@ -1,0 +1,83 @@
+#!/bin/bash
+
+# Konfiguracja
+TEMP_DIR="/opt/app/s3_transfer"
+OLD_BUCKET=""
+OLD_PROFILE="old_profile"
+NEW_BUCKET=""
+NEW_PROFILE="new_profile"
+MAX_SIZE=2000000000 # 2GB w bajtach
+
+# Utwórz folder tymczasowy, jeśli nie istnieje
+mkdir -p "$TEMP_DIR"
+
+# Pobieranie listy plików z bucketa źródłowego
+FILES=$(aws s3api list-objects --bucket "$OLD_BUCKET" --profile "$OLD_PROFILE" --query "Contents[].Key" --output text)
+
+if [ -z "$FILES" ]; then
+  echo "Brak plików do migracji w bucketcie $OLD_BUCKET."
+  exit 0
+fi
+
+CURRENT_SIZE=0
+BATCH=()
+
+# Zapisz czas rozpoczęcia
+START_TIME=$(date +%s)
+
+# Pobieranie i przenoszenie plików
+for FILE in $FILES; do
+  # Sprawdź, czy plik już istnieje w nowym bucketcie
+  if aws s3api head-object --bucket "$NEW_BUCKET" --key "$FILE" --profile "$NEW_PROFILE" 2>/dev/null; then
+    echo "Plik $FILE już istnieje w $NEW_BUCKET, pomijanie..."
+    continue
+  fi
+
+  # Pobierz rozmiar pliku
+  FILE_SIZE=$(aws s3api head-object --bucket "$OLD_BUCKET" --key "$FILE" --profile "$OLD_PROFILE" --query "ContentLength" --output text)
+
+  if (( CURRENT_SIZE + FILE_SIZE > MAX_SIZE )); then
+    echo "Przekroczono limit 2GB, przesyłanie plików..."
+
+    # Pobierz pliki do folderu tymczasowego
+    for BATCH_FILE in "${BATCH[@]}"; do
+      aws s3 cp "s3://$OLD_BUCKET/$BATCH_FILE" "$TEMP_DIR/$BATCH_FILE" --profile "$OLD_PROFILE"
+    done
+
+    # Przenieś pliki z folderu tymczasowego do nowego bucketa
+    for BATCH_FILE in "${BATCH[@]}"; do
+      aws s3 cp "$TEMP_DIR/$BATCH_FILE" "s3://$NEW_BUCKET/$BATCH_FILE" --profile "$NEW_PROFILE"
+      rm -f "$TEMP_DIR/$BATCH_FILE"
+    done
+
+    # Resetuj batch i rozmiar
+    CURRENT_SIZE=0
+    BATCH=()
+  fi
+
+  # Dodaj plik do batcha
+  BATCH+=("$FILE")
+  CURRENT_SIZE=$((CURRENT_SIZE + FILE_SIZE))
+
+done
+
+# Przenieś pozostałe pliki
+if [ ${#BATCH[@]} -gt 0 ]; then
+  echo "Przesyłanie ostatniej partii plików..."
+
+  for BATCH_FILE in "${BATCH[@]}"; do
+    aws s3 cp "s3://$OLD_BUCKET/$BATCH_FILE" "$TEMP_DIR/$BATCH_FILE" --profile "$OLD_PROFILE"
+  done
+
+  for BATCH_FILE in "${BATCH[@]}"; do
+    aws s3 cp "$TEMP_DIR/$BATCH_FILE" "s3://$NEW_BUCKET/$BATCH_FILE" --profile "$NEW_PROFILE"
+    rm -f "$TEMP_DIR/$BATCH_FILE"
+  done
+fi
+
+# Zapisz czas zakończenia i oblicz czas trwania
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+
+# Wyświetl czas trwania
+echo "Migracja zakończona w czasie: $DURATION sekund. Wszystkie pliki zostały przeniesione z $OLD_BUCKET do $NEW_BUCKET."
