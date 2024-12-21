@@ -1,0 +1,4 @@
+cat "$KATALOG_TYMCZASOWY/lista_plikow.txt" | xargs -I {} -P 10 bash -c '
+    aws s3 cp "s3://'$BUCKET_ZRODLOWY'/{}" - --profile '$PROFIL_ZRODLOWY' --no-verify-ssl --endpoint-url '$S3ENDPOINT' | \
+    aws s3 cp - "s3://'$BUCKET_DOCELOWY'/{}" --profile '$PROFIL_DOCELOWY' --no-verify-ssl --endpoint-url '$S3ENDPOINT'
+'
