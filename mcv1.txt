@@ -1,0 +1,113 @@
+#!/bin/bash
+
+# Skrypt do migracji plików między bucketami w S3 przy użyciu MinIO Client (mc).
+# Obsługuje:
+# 1. Generowanie pełnej listy plików do migracji.
+# 2. Generowanie listy przyrostowej na podstawie daty.
+# 3. Migrację plików z logowaniem sukcesów i błędów.
+# 4. Wznawianie migracji od ostatniego przetworzonego pliku.
+
+OLD_PROFILE="profil_old"   # Alias dla starego bucketa (zdefiniowany przez `mc alias set`)
+NEW_PROFILE="profil_new"   # Alias dla nowego bucketa (zdefiniowany przez `mc alias set`)
+LOG_DIR="./logs"           # Katalog do przechowywania logów
+SUCCESS_LOG="${LOG_DIR}/success.log"  # Log dla udanych migracji
+ERROR_LOG="${LOG_DIR}/error.log"      # Log dla błędów migracji
+RESUME_FILE="${LOG_DIR}/resume.list" # Plik tymczasowy do wznowienia migracji
+
+# Tworzenie katalogu na logi, jeśli nie istnieje
+mkdir -p "${LOG_DIR}"
+
+# Funkcja generująca pełną listę plików z bucketa
+# Użycie: generate_file_list BUCKET OUTPUT_FILE
+function generate_file_list() {
+  BUCKET=$1
+  OUTPUT_FILE=$2
+  echo "Generating file list from bucket: $BUCKET"
+  mc ls --recursive $BUCKET | awk '{print $5}' | sort > "$OUTPUT_FILE"
+}
+
+# Funkcja generująca listę przyrostową plików na podstawie daty
+# Użycie: generate_incremental_list BUCKET START_DATE OUTPUT_FILE
+# - BUCKET: Bucket, z którego pobieramy listę
+# - START_DATE: Data w formacie ISO 8601 (np. "2024-12-01T00:00:00Z")
+# - OUTPUT_FILE: Plik wyjściowy zawierający listę przyrostową
+function generate_incremental_list() {
+  BUCKET=$1
+  START_DATE=$2
+  OUTPUT_FILE=$3
+
+  echo "Generating incremental file list from bucket: $BUCKET since date: $START_DATE"
+
+  mc ls --json "$BUCKET" | jq -r --arg date "$START_DATE" '
+    select(.lastModified >= $date) | .key' | sort > "$OUTPUT_FILE"
+
+  echo "File list generated: $OUTPUT_FILE"
+}
+
+# Funkcja do migracji plików na podstawie listy
+# Użycie: migrate_files INPUT_LIST [START_FROM]
+# - INPUT_LIST: Plik zawierający listę plików do migracji
+# - START_FROM: (opcjonalne) Plik, od którego zaczynamy migrację
+function migrate_files() {
+  INPUT_LIST=$1
+  START_FROM=${2:-""}
+
+  echo "Starting migration from file: $START_FROM"
+
+  SKIP=1
+  while IFS= read -r FILE; do
+    # Pomijanie plików przed START_FROM
+    if [ "$SKIP" -eq 1 ] && [ "$FILE" != "$START_FROM" ]; then
+      continue
+    fi
+    SKIP=0
+
+    echo "Migrating: $FILE"
+    if mc cp "${OLD_PROFILE}/${FILE}" "${NEW_PROFILE}/${FILE}"; then
+      echo "$FILE" >> "$SUCCESS_LOG"
+    else
+      echo "$FILE" >> "$ERROR_LOG"
+    fi
+  done < "$INPUT_LIST"
+}
+
+# Funkcja do wznawiania migracji od ostatniego sukcesu
+# Użycie: resume_migration
+function resume_migration() {
+  echo "Resuming migration..."
+  LAST_SUCCESS=$(tail -n 1 "$SUCCESS_LOG")
+  migrate_files "$RESUME_FILE" "$LAST_SUCCESS"
+}
+
+# Sekcja obsługi argumentów
+case "$1" in
+  # Generowanie pełnej listy plików
+  # Użycie: ./migracja.sh generate-list BUCKET OUTPUT_FILE
+  generate-list)
+    generate_file_list "$2" "$3"
+    ;;
+
+  # Generowanie listy przyrostowej na podstawie daty
+  # Użycie: ./migracja.sh incremental-list BUCKET START_DATE OUTPUT_FILE
+  incremental-list)
+    generate_incremental_list "$2" "$3" "$4"
+    ;;
+
+  # Migracja plików na podstawie listy
+  # Użycie: ./migracja.sh migrate INPUT_LIST
+  migrate)
+    migrate_files "$2"
+    ;;
+
+  # Wznawianie migracji
+  # Użycie: ./migracja.sh resume
+  resume)
+    resume_migration
+    ;;
+
+  # Obsługa nieprawidłowego użycia
+  *)
+    echo "Usage: $0 {generate-list|incremental-list|migrate|resume}"
+    exit 1
+    ;;
+esac

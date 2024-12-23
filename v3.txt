@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# Konfiguracja
+SRC_BUCKET="oldbucket"
+SRC_PROFILE="oldprofile"
+DST_BUCKET="newbucket"
+DST_PROFILE="newprofile"
+TRANSFER_DIR="/opt/app/appown/s3_transfer"
+LOG_DIR="/opt/app/appown/logs"
+ERROR_LOG="$LOG_DIR/error.log"
+MIGRATION_LOG="$LOG_DIR/migration.log"
+BATCH_SIZE_MB=2048  # Rozmiar wsadowy w MB
+S3ENDPOINT=""  # Dodaj odpowiedni endpoint
+
+# Tworzenie katalogów logów
+mkdir -p "$LOG_DIR"
+mkdir -p "$TRANSFER_DIR"
+
+# Funkcja logująca błędy
+echo_error() {
+    echo "$(date +'%Y-%m-%d %H:%M:%S') ERROR: $1" | tee -a "$ERROR_LOG"
+}
+
+# Funkcja logująca informacje
+echo_info() {
+    echo "$(date +'%Y-%m-%d %H:%M:%S') INFO: $1" | tee -a "$MIGRATION_LOG"
+}
+
+# Rozpoczęcie migracji
+echo_info "Rozpoczęcie migracji."
+START_TIME=$(date +%s)
+
+while :; do
+    # Pobieranie partii plików do lokalnego folderu
+    echo_info "Synchronizacja plików z $SRC_BUCKET ($BATCH_SIZE_MB MB)."
+    aws s3 sync s3://$SRC_BUCKET "$TRANSFER_DIR" \
+        --profile "$SRC_PROFILE" \
+        --exact-timestamps \
+        --max-bandwidth "$((BATCH_SIZE_MB * 1024 * 1024))" \
+        --no-verify-ssl --endpoint-url "$S3ENDPOINT" || {
+        echo_error "Błąd synchronizacji z $SRC_BUCKET."
+        break
+    }
+
+    # Sprawdzanie, czy są pliki do przesłania
+    FILE_COUNT=$(find "$TRANSFER_DIR" -type f | wc -l)
+    if [ "$FILE_COUNT" -eq 0 ]; then
+        echo_info "Brak kolejnych plików do migracji. Kończenie."
+        break
+    fi
+
+    # Upload plików do nowego bucketu
+    echo_info "Upload plików do $DST_BUCKET."
+    aws s3 sync "$TRANSFER_DIR" s3://$DST_BUCKET \
+        --profile "$DST_PROFILE" \
+        --exact-timestamps \
+        --no-verify-ssl --endpoint-url "$S3ENDPOINT" || {
+        echo_error "Błąd uploadu do $DST_BUCKET."
+        break
+    }
+
+    # Usuwanie przesłanych plików lokalnie i z oldbucket
+    echo_info "Usuwanie przesłanych plików."
+    find "$TRANSFER_DIR" -type f -exec aws s3 rm "s3://$SRC_BUCKET/{}" --profile "$SRC_PROFILE" --no-verify-ssl --endpoint-url "$S3ENDPOINT" \; || {
+        echo_error "Błąd usuwania plików z $SRC_BUCKET."
+        break
+    }
+    rm -rf "$TRANSFER_DIR"/*
+
+done
+
+# Koniec migracji
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+echo_info "Migracja zakończona. Czas trwania: $((DURATION / 3600))h $(((DURATION / 60) % 60))m $((DURATION % 60))s."
