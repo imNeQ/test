@@ -1,0 +1,153 @@
+#!/bin/bash
+
+# Konfiguracja
+OLD_BUCKET="old-bucket-name"
+NEW_BUCKET="new-bucket-name"
+MINIO_ALIAS_OLD="old"
+MINIO_ALIAS_NEW="new"
+FILES_LIST="files_to_migrate.txt"
+SUCCESS_LOG="migrated_files.log"
+FAILURE_LOG="failed_files.log"
+TMP_RETRY_LIST="retry_files.txt"
+
+# Sprawdzenie, czy MinIO Client (mc) jest zainstalowany
+if ! command -v mc &> /dev/null; then
+  echo "MinIO Client (mc) nie jest zainstalowany. Zainstaluj go przed uruchomieniem skryptu."
+  exit 1
+fi
+
+# Funkcja generująca listę wszystkich plików
+generate_file_list() {
+  echo "Generowanie listy plików z bucketa ${OLD_BUCKET}..."
+  mc ls --recursive --json "${MINIO_ALIAS_OLD}/${OLD_BUCKET}" | jq -r '.key' | sort > "${FILES_LIST}"
+  if [ -s "${FILES_LIST}" ]; then
+    echo "Lista plików zapisana w ${FILES_LIST}."
+  else
+    echo "Lista plików jest pusta. Upewnij się, że bucket ${OLD_BUCKET} zawiera dane."
+  fi
+}
+
+# Funkcja generująca listę przyrostową plików na podstawie daty
+generate_incremental_file_list() {
+  INCREMENTAL_DATE="$1"
+  if [ -z "$INCREMENTAL_DATE" ]; then
+    echo "Podaj datę początkową w formacie ISO 8601 (np. 2023-12-01T00:00:00Z)."
+    exit 1
+  fi
+
+  echo "Generowanie listy przyrostowej plików zmodyfikowanych po ${INCREMENTAL_DATE}..."
+  mc ls --recursive --json "${MINIO_ALIAS_OLD}/${OLD_BUCKET}" | \
+    jq -r --arg date "$INCREMENTAL_DATE" 'select(.lastModified >= $date) | .key' | \
+    sort > "${FILES_LIST}"
+
+  if [ -s "${FILES_LIST}" ]; then
+    echo "Lista przyrostowa plików zapisana w ${FILES_LIST}."
+  else
+    echo "Brak plików zmodyfikowanych po ${INCREMENTAL_DATE}."
+  fi
+}
+
+# Funkcja migrująca pliki z listy
+migrate_files() {
+  echo "Rozpoczynanie migracji plików z listy ${FILES_LIST}..."
+  >"${SUCCESS_LOG}"
+  >"${FAILURE_LOG}"
+
+  while IFS= read -r file; do
+    echo "Migracja pliku: ${file}"
+    if mc cp "${MINIO_ALIAS_OLD}/${OLD_BUCKET}/${file}" "${MINIO_ALIAS_NEW}/${NEW_BUCKET}/${file}"; then
+      echo "${file}" >> "${SUCCESS_LOG}"
+    else
+      echo "${file}" >> "${FAILURE_LOG}"
+    fi
+  done < "${FILES_LIST}"
+
+  echo "Migracja zakończona."
+}
+
+# Funkcja migrująca wszystkie pliki z bucketa do bucketa
+migrate_all_files() {
+  echo "Rozpoczynanie migracji całego bucketa ${OLD_BUCKET} do ${NEW_BUCKET}..."
+
+  # Generowanie listy plików z datą w nazwie
+  timestamp=$(date "+%Y%m%d_%H%M%S")
+  FILES_LIST="files_to_migrate_${timestamp}.txt"
+  FAILURE_LOG="failed_files_${timestamp}.log"
+
+  generate_file_list
+
+  # Utworzenie pustego pliku logów dla błędów
+  >"${FAILURE_LOG}"
+
+  # Wykonanie migracji i logowanie błędów
+  mc cp --recursive "${MINIO_ALIAS_OLD}/${OLD_BUCKET}" "${MINIO_ALIAS_NEW}/${NEW_BUCKET}" 2> >(tee -a "${FAILURE_LOG}" >&2)
+
+  # Podsumowanie
+  if [ -s "${FAILURE_LOG}" ]; then
+    echo "Migracja zakończona z błędami. Szczegóły w pliku: ${FAILURE_LOG}"
+  else
+    echo "Migracja zakończona sukcesem. Brak błędów."
+    rm -f "${FAILURE_LOG}" # Usunięcie pustego pliku logów
+  fi
+}
+
+
+# Funkcja ponawiająca migrację nieudanych plików
+retry_failed_files() {
+  if [ ! -s "${FAILURE_LOG}" ]; then
+    echo "Brak plików do ponowienia migracji."
+    return
+  fi
+
+  echo "Rozpoczynanie ponownej migracji nieudanych plików..."
+  cp "${FAILURE_LOG}" "${TMP_RETRY_LIST}"
+  >"${FAILURE_LOG}"
+
+  while IFS= read -r file; do
+    echo "Ponowna próba migracji pliku: ${file}"
+    if mc cp "${MINIO_ALIAS_OLD}/${OLD_BUCKET}/${file}" "${MINIO_ALIAS_NEW}/${NEW_BUCKET}/${file}"; then
+      echo "${file}" >> "${SUCCESS_LOG}"
+    else
+      echo "${file}" >> "${FAILURE_LOG}"
+    fi
+  done < "${TMP_RETRY_LIST}"
+
+  echo "Ponowna migracja zakończona."
+}
+
+# Funkcja weryfikacji plików
+verify_migration() {
+  echo "Weryfikacja migracji..."
+  mc ls --recursive --json "${MINIO_ALIAS_NEW}/${NEW_BUCKET}" | jq -r '.key' | sort > "new_bucket_files.txt"
+  diff "${FILES_LIST}" "new_bucket_files.txt" > "verification_diff.txt"
+  if [ -s "verification_diff.txt" ]; then
+    echo "Różnice wykryte. Zobacz plik verification_diff.txt."
+  else
+    echo "Weryfikacja zakończona sukcesem. Wszystkie pliki zostały zmigrowane."
+  fi
+}
+
+# Menu akcji
+case $1 in
+  generate)
+    generate_file_list
+    ;;
+  generate-incremental)
+    generate_incremental_file_list "$2"
+    ;;
+  migrate)
+    migrate_files
+    ;;
+  migrate-all)
+    migrate_all_files
+    ;;
+  verify)
+    verify_migration
+    ;;
+  retry)
+    retry_failed_files
+    ;;
+  *)
+    echo "Użycie: $0 {generate|generate-incremental <date>|migrate|migrate-all|verify|retry}"
+    ;;
+esac
