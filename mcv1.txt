@@ -22,8 +22,9 @@ mkdir -p "${LOG_DIR}"
 function generate_file_list() {
   BUCKET=$1
   OUTPUT_FILE=$2
-  echo "Generating file list from bucket: $BUCKET"
-  mc ls --recursive $BUCKET | awk '{print $5}' | sort > "$OUTPUT_FILE"
+  echo "Generuję pełną listę plików z bucketa: $BUCKET"
+  mc ls --recursive --json "$BUCKET" | jq -r '.key' | sort > "$OUTPUT_FILE"
+  echo "Lista plików została zapisana do: $OUTPUT_FILE"
 }
 
 # Funkcja generująca listę przyrostową plików na podstawie daty
@@ -36,12 +37,12 @@ function generate_incremental_list() {
   START_DATE=$2
   OUTPUT_FILE=$3
 
-  echo "Generating incremental file list from bucket: $BUCKET since date: $START_DATE"
+  echo "Generuję listę plików od daty: $START_DATE z bucketa: $BUCKET"
 
-  mc ls --json "$BUCKET" | jq -r --arg date "$START_DATE" '
-    select(.lastModified >= $date) | .key' | sort > "$OUTPUT_FILE"
+  mc ls --json "$BUCKET" | jq -r --arg date "$START_DATE" \
+    'select(.lastModified >= $date) | .key' | sort > "$OUTPUT_FILE"
 
-  echo "File list generated: $OUTPUT_FILE"
+  echo "Lista przyrostowa plików została zapisana do: $OUTPUT_FILE"
 }
 
 # Funkcja do migracji plików na podstawie listy
@@ -52,7 +53,7 @@ function migrate_files() {
   INPUT_LIST=$1
   START_FROM=${2:-""}
 
-  echo "Starting migration from file: $START_FROM"
+  echo "Rozpoczynam migrację od pliku: $START_FROM"
 
   SKIP=1
   while IFS= read -r FILE; do
@@ -62,7 +63,7 @@ function migrate_files() {
     fi
     SKIP=0
 
-    echo "Migrating: $FILE"
+    echo "Migruję: $FILE"
     if mc cp "${OLD_PROFILE}/${FILE}" "${NEW_PROFILE}/${FILE}"; then
       echo "$FILE" >> "$SUCCESS_LOG"
     else
@@ -74,7 +75,7 @@ function migrate_files() {
 # Funkcja do wznawiania migracji od ostatniego sukcesu
 # Użycie: resume_migration
 function resume_migration() {
-  echo "Resuming migration..."
+  echo "Wznawiam migrację..."
   LAST_SUCCESS=$(tail -n 1 "$SUCCESS_LOG")
   migrate_files "$RESUME_FILE" "$LAST_SUCCESS"
 }
@@ -107,7 +108,7 @@ case "$1" in
 
   # Obsługa nieprawidłowego użycia
   *)
-    echo "Usage: $0 {generate-list|incremental-list|migrate|resume}"
+    echo "Użycie: $0 {generate-list|incremental-list|migrate|resume}"
     exit 1
     ;;
 esac
