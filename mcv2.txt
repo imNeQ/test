@@ -136,17 +136,33 @@ verify_migration() {
   mc ls --recursive --json "${MINIO_ALIAS_NEW}/${NEW_BUCKET}" | jq -r '.key' | sort > "${NEW_FILES_LIST}"
 
   # Porównanie list
-  DIFF_OUTPUT="verification_diff.txt"
-  diff -u "${FILES_LIST}" "${NEW_FILES_LIST}" > "${DIFF_OUTPUT}"
-  
-  if [ -s "${DIFF_OUTPUT}" ]; then
-    echo "Różnice wykryte między oryginalną a nową listą plików. Szczegóły w ${DIFF_OUTPUT}."
-    echo "Sprawdź, które pliki zostały pominięte lub różnią się."
+  echo "Porównywanie list plików..."
+  MISSING_FILES="missing_files.txt"
+  EXTRA_FILES="extra_files.txt"
+
+  # Pliki, które są w oryginalnej liście, ale brakuje ich w nowym bucket
+  comm -23 "${FILES_LIST}" "${NEW_FILES_LIST}" > "${MISSING_FILES}"
+
+  # Pliki, które są w nowym bucket, ale nie było ich na oryginalnej liście
+  comm -13 "${FILES_LIST}" "${NEW_FILES_LIST}" > "${EXTRA_FILES}"
+
+  # Wynik weryfikacji
+  if [ -s "${MISSING_FILES}" ] || [ -s "${EXTRA_FILES}" ]; then
+    echo "Weryfikacja zakończona z różnicami:"
+    if [ -s "${MISSING_FILES}" ]; then
+      echo "Pliki brakujące w nowym bucket (zapisane w ${MISSING_FILES}):"
+      cat "${MISSING_FILES}"
+    fi
+    if [ -s "${EXTRA_FILES}" ]; then
+      echo "Dodatkowe pliki w nowym bucket (zapisane w ${EXTRA_FILES}):"
+      cat "${EXTRA_FILES}"
+    fi
   else
-    echo "Weryfikacja zakończona sukcesem. Wszystkie pliki zostały zmigrowane."
-    rm -f "${DIFF_OUTPUT}" # Usunięcie pustego pliku z różnicami
+    echo "Weryfikacja zakończona sukcesem. Wszystkie pliki zostały zmigrowane poprawnie."
+    rm -f "${MISSING_FILES}" "${EXTRA_FILES}" # Usunięcie pustych plików z różnicami
   fi
 }
+
 
 # Menu akcji
 case $1 in
@@ -157,7 +173,7 @@ case $1 in
     generate_incremental_file_list "$2"
     ;;
   migrate)
-    migrate_files
+    migrate_files "$2"
     ;;
   migrate-all)
     migrate_all_files
