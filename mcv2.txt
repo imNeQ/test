@@ -125,10 +125,14 @@ retry_failed_files() {
 verify_migration() {
   echo "Weryfikacja migracji..."
   
-  # Upewnij się, że lista oryginalna istnieje
+  # Jeśli lista oryginalnych plików nie istnieje, generujemy ją
   if [ ! -f "${FILES_LIST}" ]; then
-    echo "Plik z listą oryginalnych plików (${FILES_LIST}) nie istnieje. Wygeneruj go przed weryfikacją."
-    exit 1
+    echo "Plik z listą oryginalnych plików (${FILES_LIST}) nie istnieje. Generowanie listy..."
+    generate_file_list
+    if [ ! -f "${FILES_LIST}" ] || [ ! -s "${FILES_LIST}" ]; then
+      echo "Nie udało się wygenerować listy oryginalnych plików. Weryfikacja przerwana."
+      exit 1
+    fi
   fi
   
   # Wygenerowanie listy plików w nowym bucket
@@ -162,6 +166,7 @@ verify_migration() {
     rm -f "${MISSING_FILES}" "${EXTRA_FILES}" # Usunięcie pustych plików z różnicami
   fi
 }
+
 
 
 # Menu akcji
