@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# Konfiguracja
+OLD_BUCKET="old-bucket-name"
+NEW_BUCKET="new-bucket-name"
+MINIO_ALIAS_OLD="old"
+MINIO_ALIAS_NEW="new"
+FILES_LIST="files_to_migrate.txt"
+SUCCESS_LOG="migrated_files.log"
+FAILURE_LOG="failed_files.log"
+TMP_RETRY_LIST="retry_files.txt"
+
+# Pliki tymczasowe do przechowywania wyników
+OLD_LIST="/tmp/old_files_metadata.txt"
+NEW_LIST="/tmp/new_files_metadata.txt"
+MISMATCH_LIST="/tmp/mismatched_files.txt"
+MISSING_FILES="/tmp/missing_files.txt"
+
+# Funkcja: Generowanie listy plików z metadanymi (rozmiar, ETag)
+generate_file_list() {
+    local alias=$1
+    local bucket=$2
+    local output_file=$3
+
+    echo "Generowanie listy plików dla ${alias}/${bucket}..."
+    mc find "${alias}/${bucket}" --name "*" --exec "mc stat {} | awk '/^Name|Size|ETag/{print \$2}'" > "${output_file}"
+}
+
+# Funkcja: Porównanie list plików
+compare_files() {
+    echo "Porównywanie list plików..."
+    > "${MISMATCH_LIST}"
+    > "${MISSING_FILES}"
+
+    # Tworzenie mapy plików z nowego bucketa
+    declare -A new_files
+    while IFS= read -r file; do
+        read -r size
+        read -r etag
+        new_files["$file"]="$size $etag"
+    done < <(paste - - - < "${NEW_LIST}")
+
+    # Sprawdzanie plików ze starego bucketa
+    while IFS= read -r file; do
+        read -r size
+        read -r etag
+
+        # Pobranie metadanych pliku z nowego bucketa
+        if [[ -z "${new_files["$file"]}" ]]; then
+            echo "${file}" >> "${MISSING_FILES}"
+        else
+            new_size_etag=(${new_files["$file"]})
+            if [[ "${size}" != "${new_size_etag[0]}" || "${etag}" != "${new_size_etag[1]}" ]]; then
+                echo "${file} - Rozmiar lub suma kontrolna się nie zgadza." >> "${MISMATCH_LIST}"
+            fi
+        fi
+    done < <(paste - - - < "${OLD_LIST}")
+}
+
+# Generowanie listy plików w obu bucketach
+generate_file_list "${MINIO_ALIAS_OLD}" "${OLD_BUCKET}" "${OLD_LIST}"
+generate_file_list "${MINIO_ALIAS_NEW}" "${NEW_BUCKET}" "${NEW_LIST}"
+
+# Porównanie plików
+compare_files
+
+# Podsumowanie
+if [ -s "${MISSING_FILES}" ]; then
+    echo "Brakujące pliki:" | tee -a "${FAILURE_LOG}"
+    cat "${MISSING_FILES}" | tee -a "${FAILURE_LOG}"
+else
+    echo "Brakujące pliki: brak." | tee -a "${SUCCESS_LOG}"
+fi
+
+if [ -s "${MISMATCH_LIST}" ]; then
+    echo "Niezgodności w plikach (rozmiar/suma kontrolna):" | tee -a "${FAILURE_LOG}"
+    cat "${MISMATCH_LIST}" | tee -a "${FAILURE_LOG}"
+else
+    echo "Wszystkie pliki są zgodne pod względem rozmiaru i sumy kontrolnej." | tee -a "${SUCCESS_LOG}"
+fi
+
+# Czyszczenie plików tymczasowych
+rm -f "${OLD_LIST}" "${NEW_LIST}" "${MISMATCH_LIST}" "${MISSING_FILES}"
+
+echo "Weryfikacja zakończona."
