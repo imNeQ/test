@@ -1,0 +1,19 @@
+retry_missing_files() {
+  MISSING_FILES="missing_files.txt"
+
+  if [ -s "${MISSING_FILES}" ]; then
+    echo "Rozpoczynanie uzupełniania brakujących plików..."
+    while IFS= read -r file; do
+      echo "Migracja brakującego pliku: ${file}"
+      if mc cp "${MINIO_ALIAS_OLD}/${OLD_BUCKET}/${file}" "${MINIO_ALIAS_NEW}/${NEW_BUCKET}/${file}"; then
+        echo "${file}" >> "${SUCCESS_LOG}"
+      else
+        echo "${file}" >> "${FAILURE_LOG}"
+      fi
+    done < "${MISSING_FILES}"
+
+    echo "Uzupełnianie brakujących plików zakończone."
+  else
+    echo "Brak plików do uzupełnienia w ${MISSING_FILES}."
+  fi
+}
