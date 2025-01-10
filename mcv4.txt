@@ -1,21 +1,3 @@
-#!/bin/bash
-
-# Konfiguracja
-OLD_BUCKET="old-bucket-name"
-NEW_BUCKET="new-bucket-name"
-MINIO_ALIAS_OLD="old"
-MINIO_ALIAS_NEW="new"
-FILES_LIST="files_to_migrate.txt"
-SUCCESS_LOG="migrated_files.log"
-FAILURE_LOG="failed_files.log"
-TMP_RETRY_LIST="retry_files.txt"
-
-# Pliki tymczasowe
-OLD_LIST="/tmp/old_files_metadata.txt"
-NEW_LIST="/tmp/new_files_metadata.txt"
-MISSING_FILES="/tmp/missing_files.txt"
-MISMATCH_FILES="/tmp/mismatched_files.txt"
-
 # Funkcja: Generowanie listy plików z metadanymi (rozmiar, ETag)
 generate_file_list() {
     local alias=$1
@@ -23,7 +5,7 @@ generate_file_list() {
     local output_file=$3
 
     echo "Generowanie listy plików dla ${alias}/${bucket}..."
-    mc find "${alias}/${bucket}" --name "*" --exec "mc stat {} | awk '/^Name|Size|ETag/{print \$2}'" > "${output_file}"
+    mc ls --recursive --json "${alias}/${bucket}" | jq -r '"\(.key)\t\(.size)\t\(.etag)"' > "${output_file}"
 }
 
 # Funkcja: Sprawdzanie obecności i zgodności plików
@@ -33,16 +15,11 @@ compare_files() {
     > "${MISMATCH_FILES}"
 
     declare -A new_files
-    while IFS= read -r file; do
-        read -r size
-        read -r etag
+    while IFS=$'\t' read -r file size etag; do
         new_files["$file"]="$size $etag"
-    done < <(paste - - - < "${NEW_LIST}")
+    done < "${NEW_LIST}"
 
-    while IFS= read -r file; do
-        read -r size
-        read -r etag
-
+    while IFS=$'\t' read -r file size etag; do
         if [[ -z "${new_files["$file"]}" ]]; then
             echo "${file}" >> "${MISSING_FILES}"
         else
@@ -51,8 +28,14 @@ compare_files() {
                 echo "${file} - Rozmiar lub suma kontrolna niezgodne." >> "${MISMATCH_FILES}"
             fi
         fi
-    done < <(paste - - - < "${OLD_LIST}")
+    done < "${OLD_LIST}"
 }
+
+# Sprawdzenie, czy narzędzie jq jest zainstalowane
+if ! command -v jq &> /dev/null; then
+    echo "Narzędzie 'jq' jest wymagane, ale nie zostało znalezione. Zainstaluj je i spróbuj ponownie."
+    exit 1
+fi
 
 # Generowanie listy plików
 generate_file_list "${MINIO_ALIAS_OLD}" "${OLD_BUCKET}" "${OLD_LIST}"
