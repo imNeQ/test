@@ -1,0 +1,21 @@
+#!/bin/bash
+# Porównanie folderów i wypisanie nowych plików .sql w nowym folderze
+
+OLD_DIR="$1"  # stary folder, np. 18
+NEW_DIR="$2"  # nowy folder, np. 19
+
+if [[ -z "$OLD_DIR" || -z "$NEW_DIR" ]]; then
+    echo "Użycie: $0 <stary_folder> <nowy_folder>"
+    exit 1
+fi
+
+if [[ ! -d "$OLD_DIR" || ! -d "$NEW_DIR" ]]; then
+    echo "❌ Podane ścieżki muszą być katalogami"
+    exit 2
+fi
+
+echo "📄 Nowe pliki .sql w folderze $NEW_DIR względem $OLD_DIR:"
+
+comm -13 \
+    <(cd "$OLD_DIR" && find . -type f -name "*.sql" | sort) \
+    <(cd "$NEW_DIR" && find . -type f -name "*.sql" | sort)
