@@ -1,21 +1,25 @@
-#!/bin/bash
-# Porównanie folderów i wypisanie nowych plików .sql w nowym folderze
+(() => {
+  const userEl = document.querySelector('input[name="username"]');
+  const passEl = document.querySelector('input[name="password"]');
+  const submitEl = document.querySelector('input[name="submit"][type="submit"]');
 
-OLD_DIR="$1"  # stary folder, np. 18
-NEW_DIR="$2"  # nowy folder, np. 19
+  if (!userEl || !passEl || !submitEl) {
+    console.error('Nie znaleziono jednego z pól formularza.');
+    return;
+  }
 
-if [[ -z "$OLD_DIR" || -z "$NEW_DIR" ]]; then
-    echo "Użycie: $0 <stary_folder> <nowy_folder>"
-    exit 1
-fi
+  // Ustaw wartości w polach
+  userEl.value = "xx";
+  passEl.value = "xx";
 
-if [[ ! -d "$OLD_DIR" || ! -d "$NEW_DIR" ]]; then
-    echo "❌ Podane ścieżki muszą być katalogami"
-    exit 2
-fi
+  // Wyślij zdarzenia input/change (dla stron SPA to ważne)
+  ["input", "change"].forEach(evt => {
+    userEl.dispatchEvent(new Event(evt, { bubbles: true }));
+    passEl.dispatchEvent(new Event(evt, { bubbles: true }));
+  });
 
-echo "📄 Nowe pliki .sql w folderze $NEW_DIR względem $OLD_DIR:"
+  // Kliknij przycisk submit
+  submitEl.click();
 
-comm -13 \
-    <(cd "$OLD_DIR" && find . -type f -name "*.sql" | sort) \
-    <(cd "$NEW_DIR" && find . -type f -name "*.sql" | sort)
+  console.log("Formularz został uzupełniony i wysłany.");
+})();
