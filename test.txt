@@ -4,22 +4,31 @@
   const submitEl = document.querySelector('input[name="submit"][type="submit"]');
 
   if (!userEl || !passEl || !submitEl) {
-    console.error('Nie znaleziono jednego z pól formularza.');
+    console.error("Nie znaleziono pól formularza.");
     return;
   }
 
-  // Ustaw wartości w polach
-  userEl.value = "xx";
-  passEl.value = "xx";
+  let attempt = 0;
+  const maxAttempts = 5;
 
-  // Wyślij zdarzenia input/change (dla stron SPA to ważne)
-  ["input", "change"].forEach(evt => {
-    userEl.dispatchEvent(new Event(evt, { bubbles: true }));
-    passEl.dispatchEvent(new Event(evt, { bubbles: true }));
-  });
+  const trySubmit = () => {
+    attempt++;
+    userEl.value = "xx";
+    passEl.value = "xx";
 
-  // Kliknij przycisk submit
-  submitEl.click();
+    ["input", "change"].forEach(evt => {
+      userEl.dispatchEvent(new Event(evt, { bubbles: true }));
+      passEl.dispatchEvent(new Event(evt, { bubbles: true }));
+    });
 
-  console.log("Formularz został uzupełniony i wysłany.");
+    console.log(`Próba ${attempt} z ${maxAttempts}`);
+    submitEl.click(); // klikniecie powoduje wysłanie formularza
+
+    if (attempt < maxAttempts) {
+      // jeśli formularz NIE przeładowuje strony, możesz ustawić timeout
+      setTimeout(trySubmit, 1000); 
+    }
+  };
+
+  trySubmit();
 })();
