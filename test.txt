@@ -1,34 +1,25 @@
 (() => {
-  const KEY = "test_login_count";
-  const MAX = 5;
-
-  const n = +(localStorage.getItem(KEY) || 0);
-  if (n >= MAX) {
-    console.log(`Limit ${MAX} prób osiągnięty.`);
-    return;
-  }
-
-  const userEl   = document.querySelector('input[name="username"]');
-  const passEl   = document.querySelector('input[name="password"]');
+  const userEl = document.querySelector('input[name="username"]');
+  const passEl = document.querySelector('input[name="password"]');
   const submitEl = document.querySelector('input[name="submit"][type="submit"]');
 
   if (!userEl || !passEl || !submitEl) {
-    console.error("Nie znaleziono pól formularza.");
+    console.error('Nie znaleziono jednego z pól formularza.');
     return;
   }
 
-  // wpisz dane i wywołaj zdarzenia
+  // Ustaw wartości w polach
   userEl.value = "xx";
   passEl.value = "xx";
-  ["input","change"].forEach(evt => {
+
+  // Wyślij zdarzenia input/change (dla stron SPA to ważne)
+  ["input", "change"].forEach(evt => {
     userEl.dispatchEvent(new Event(evt, { bubbles: true }));
     passEl.dispatchEvent(new Event(evt, { bubbles: true }));
   });
 
-  const next = n + 1;
-  localStorage.setItem(KEY, String(next));
-  console.log(`Próba ${next} z ${MAX} — wysyłam formularz...`);
-
-  // wyślij
+  // Kliknij przycisk submit
   submitEl.click();
+
+  console.log("Formularz został uzupełniony i wysłany.");
 })();
