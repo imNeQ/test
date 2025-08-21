@@ -1,6 +1,15 @@
 (() => {
-  const userEl = document.querySelector('input[name="username"]');
-  const passEl = document.querySelector('input[name="password"]');
+  const KEY = "test_login_count";
+  const MAX = 5;
+
+  const n = +(localStorage.getItem(KEY) || 0);
+  if (n >= MAX) {
+    console.log(`Limit ${MAX} prób osiągnięty.`);
+    return;
+  }
+
+  const userEl   = document.querySelector('input[name="username"]');
+  const passEl   = document.querySelector('input[name="password"]');
   const submitEl = document.querySelector('input[name="submit"][type="submit"]');
 
   if (!userEl || !passEl || !submitEl) {
@@ -8,27 +17,18 @@
     return;
   }
 
-  let attempt = 0;
-  const maxAttempts = 5;
+  // wpisz dane i wywołaj zdarzenia
+  userEl.value = "xx";
+  passEl.value = "xx";
+  ["input","change"].forEach(evt => {
+    userEl.dispatchEvent(new Event(evt, { bubbles: true }));
+    passEl.dispatchEvent(new Event(evt, { bubbles: true }));
+  });
 
-  const trySubmit = () => {
-    attempt++;
-    userEl.value = "xx";
-    passEl.value = "xx";
+  const next = n + 1;
+  localStorage.setItem(KEY, String(next));
+  console.log(`Próba ${next} z ${MAX} — wysyłam formularz...`);
 
-    ["input", "change"].forEach(evt => {
-      userEl.dispatchEvent(new Event(evt, { bubbles: true }));
-      passEl.dispatchEvent(new Event(evt, { bubbles: true }));
-    });
-
-    console.log(`Próba ${attempt} z ${maxAttempts}`);
-    submitEl.click(); // klikniecie powoduje wysłanie formularza
-
-    if (attempt < maxAttempts) {
-      // jeśli formularz NIE przeładowuje strony, możesz ustawić timeout
-      setTimeout(trySubmit, 1000); 
-    }
-  };
-
-  trySubmit();
+  // wyślij
+  submitEl.click();
 })();
